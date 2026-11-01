@@ -13,7 +13,15 @@ VERSION="$(tr -d '[:space:]' < VERSION)"
 APP="Wallpaper Studio.app"
 DMG="dist/Wallpaper-Studio-$VERSION.dmg"
 
-./test.sh >/dev/null 2>&1 && echo "tests: passed" || { echo "tests FAILED; aborting release"; exit 1; }
+TEST_LOG="$(mktemp)"
+if ./test.sh >"$TEST_LOG" 2>&1; then
+  echo "tests: passed"
+else
+  echo "tests FAILED; aborting release. Failing lines (full log: $TEST_LOG):"
+  grep -E "error:|Expectation failed|failed after" "$TEST_LOG" | head -20 || true
+  exit 1
+fi
+rm -f "$TEST_LOG"
 ./build.sh
 
 mkdir -p dist
