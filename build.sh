@@ -13,6 +13,13 @@ BIN="$(swift build -c release --show-bin-path)/WallpaperStudio"
 rm -rf "$APP" "Live Wallpaper.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/WallpaperStudio"
+# SwiftPM stamps the binary as built against the minimum SDK (14.0). macOS decides whether an app gets the current system design
+# (Liquid Glass sidebar, window and controls) from the SDK stamp, so record the real SDK the app was compiled against. The
+# minimum OS stays 14.0; the glass code is guarded by #available(macOS 26, *). Must run before codesign.
+SDK_VERSION="$(xcrun --show-sdk-version 2>/dev/null || true)"
+if [ -n "$SDK_VERSION" ] && command -v vtool >/dev/null; then
+  vtool -set-build-version macos 14.0 "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/WallpaperStudio" "$APP/Contents/MacOS/WallpaperStudio" >/dev/null 2>&1 || echo "note: could not restamp the SDK version"
+fi
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

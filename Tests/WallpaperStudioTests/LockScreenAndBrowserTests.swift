@@ -198,6 +198,9 @@ final class MiniWebServer {
     private(set) var port: UInt16 = 0
     private(set) var requests: [String] = []
     var routes: [String: Reply] = [:]
+    /// Answers for any path that starts with the key (for addresses that carry a query string).
+    var prefixRoutes: [String: Reply] = [:]
+    private(set) var rawRequests: [String] = []
     private let lock = NSLock()
 
     init() throws {
@@ -212,13 +215,15 @@ final class MiniWebServer {
     deinit { listener.cancel() }
 
     var requestedPaths: [String] { lock.lock(); defer { lock.unlock() }; return requests }
+    var rawRequestTexts: [String] { lock.lock(); defer { lock.unlock() }; return rawRequests }
 
     private func handle(_ c: NWConnection) {
         c.start(queue: .global())
         c.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, _ in
             guard let self, let data, let text = String(data: data, encoding: .utf8), let line = text.split(separator: "\r\n").first else { c.cancel(); return }
             let path = String(line.split(separator: " ").dropFirst().first ?? "/")
-            self.lock.lock(); self.requests.append(path); let reply = self.routes[path] ?? Reply(status: 404, body: Data("missing".utf8)); self.lock.unlock()
+            self.lock.lock(); self.requests.append(path); self.rawRequests.append(text)
+            let reply = self.routes[path] ?? self.prefixRoutes.first(where: { path.hasPrefix($0.key) })?.value ?? Reply(status: 404, body: Data("missing".utf8)); self.lock.unlock()
             var head = "HTTP/1.1 \(reply.status) OK\r\nConnection: close\r\n"
             for (k, v) in reply.headers { head += "\(k): \(v)\r\n" }
             if reply.headers["Content-Length"] == nil { head += "Content-Length: \(reply.body.count)\r\n" }
@@ -356,5 +361,158 @@ final class MiniWebServer {
         print("LIVE links:", links, "blocked:", browser.blockedNavigations)
         #expect(links.contains { $0.contains("/dl/hd/") } && links.contains { $0.contains("/dl/4k/") })
         browser.stop(); window.close()
+    }
+}
+
+// MARK: - Pexels / Pixabay grid
+
+@MainActor
+@Suite struct StockModelTests {
+    func spin(_ s: Double) async {
+        let end = Date().addingTimeInterval(s)
+        while Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.01)); try? await Task.sleep(nanoseconds: 5_000_000) }
+    }
+    func waitUntil(_ seconds: Double = 15, _ condition: () -> Bool) async {
+        let end = Date().addingTimeInterval(seconds)
+        while !condition() && Date() < end { await spin(0.05) }
+    }
+
+    func make(server: MiniWebServer, key: String? = "KEY") -> (StockModel, LibraryModel, UserDefaults) {
+        let name = "stock-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        if let key { defaults.set(key, forKey: StockProvider.pexels.defaultsKey); defaults.set(key, forKey: StockProvider.pixabay.defaultsKey) }
+        let lib = LibraryModel(storage: LibraryStorage(root: FileManager.default.temporaryDirectory.appendingPathComponent("\(name)/LiveWallpaper/Library")), defaults: defaults)
+        let base = URL(string: "http://127.0.0.1:\(server.port)")!
+        let model = StockModel(library: lib, defaults: defaults, session: URLSession(configuration: .ephemeral), bases: [.pexels: base, .pixabay: base])
+        return (model, lib, defaults)
+    }
+
+    func pexelsBody(_ port: UInt16, ids: [Int], total: Int = 2) -> Data {
+        let items = ids.map { id in
+            "{\"id\":\(id),\"url\":\"https://www.pexels.com/video/calm-sea-\(id)/\",\"duration\":5,\"user\":{\"name\":\"Ada\"},\"video_files\":[{\"link\":\"https://127.0.0.1:\(port)/never.mp4\",\"width\":1920,\"height\":1080,\"file_type\":\"video/mp4\"}]}"
+        }.joined(separator: ",")
+        return Data("{\"page\":1,\"per_page\":24,\"total_results\":\(total),\"videos\":[\(items)]}".utf8)
+    }
+
+    @Test func searchSendsTheKeyInTheHeaderAndShowsTheClips() async throws {
+        let server = try MiniWebServer()
+        server.prefixRoutes["/videos/search"] = .init(headers: ["Content-Type": "application/json"], body: pexelsBody(server.port, ids: [11, 22]))
+        let (model, _, _) = make(server: server)
+        model.provider = .pexels
+        model.text = "sea"
+        model.search()
+        await waitUntil { !model.clips.isEmpty }
+        #expect(model.clips.map(\.providerID) == [11, 22])
+        #expect(model.clips[0].title == "Calm sea")
+        let raw = try #require(server.rawRequestTexts.first(where: { $0.contains("/videos/search") }))
+        #expect(raw.contains("query=sea"))
+        #expect(raw.lowercased().contains("authorization: key"))
+        #expect(!(raw.split(separator: "\r\n").first ?? "").contains("KEY"))   // the key is not in the address
+    }
+
+    @Test func withoutAKeyNothingIsRequested() async throws {
+        let server = try MiniWebServer()
+        let (model, _, _) = make(server: server, key: nil)
+        model.search()
+        await spin(0.3)
+        #expect(!model.hasKey && model.clips.isEmpty && server.requestedPaths.isEmpty)
+    }
+
+    @Test func aRejectedKeyAndRateLimitingAreExplained() async throws {
+        let server = try MiniWebServer()
+        server.prefixRoutes["/videos/popular"] = .init(status: 401, body: Data("no".utf8))
+        let (model, _, _) = make(server: server)
+        model.provider = .pexels
+        model.search()
+        await waitUntil { model.message != nil }
+        #expect(model.message?.contains("rejected the API key") == true && model.clips.isEmpty && !model.isLoading)
+
+        server.prefixRoutes["/videos/popular"] = .init(status: 429, body: Data("slow".utf8))
+        model.search()
+        await waitUntil { model.message?.contains("limiting") == true }
+        #expect(model.message?.contains("limiting") == true)
+    }
+
+    @Test func noResultsSaysSo() async throws {
+        let server = try MiniWebServer()
+        server.prefixRoutes["/videos/popular"] = .init(headers: ["Content-Type": "application/json"], body: pexelsBody(server.port, ids: [], total: 0))
+        let (model, _, _) = make(server: server)
+        model.provider = .pexels
+        model.search()
+        await waitUntil { model.message != nil }
+        #expect(model.message?.contains("No results") == true && !model.hasMore)
+    }
+
+    @Test func loadMoreAppendsTheNextPageWithoutDuplicates() async throws {
+        let server = try MiniWebServer()
+        server.routes["/videos/popular?per_page=24&page=1&orientation=landscape"] = .init(headers: ["Content-Type": "application/json"], body: pexelsBody(server.port, ids: [1, 2], total: 100))
+        server.routes["/videos/popular?per_page=24&page=2&orientation=landscape"] = .init(headers: ["Content-Type": "application/json"], body: pexelsBody(server.port, ids: [2, 3], total: 100))
+        let (model, _, _) = make(server: server)
+        model.provider = .pexels
+        model.search()
+        await waitUntil { model.clips.count == 2 }
+        #expect(model.hasMore)
+        model.loadMore()
+        await waitUntil { model.clips.count == 3 }
+        #expect(model.clips.map(\.providerID) == [1, 2, 3])
+    }
+
+    @Test func aSlowOldSearchCannotOverwriteANewerOne() async throws {
+        let server = try MiniWebServer()
+        server.prefixRoutes["/videos/search?query=first"] = .init(headers: ["Content-Type": "application/json"], body: pexelsBody(server.port, ids: [1]))
+        server.prefixRoutes["/videos/search?query=second"] = .init(headers: ["Content-Type": "application/json"], body: pexelsBody(server.port, ids: [2]))
+        let (model, _, _) = make(server: server)
+        model.provider = .pexels
+        model.text = "first"; model.search()
+        model.text = "second"; model.search()
+        await waitUntil { !model.clips.isEmpty }
+        await spin(0.3)
+        #expect(model.clips.map(\.providerID) == [2])
+    }
+
+    @Test func addingDownloadsTheBestFileIntoTheLibraryAndMarksItAdded() async throws {
+        let server = try MiniWebServer()
+        let video = try Data(contentsOf: Fixtures.mp4())
+        server.routes["/files/best.mp4"] = .init(headers: ["Content-Type": "video/mp4"], body: video)
+        let (model, lib, _) = make(server: server)
+        let clip = StockClip(provider: .pixabay, providerID: 77, title: "Calm sea", author: "Ada", pageURL: nil, thumbURL: nil, duration: 5,
+                             files: [StockFile(url: URL(string: "http://127.0.0.1:\(server.port)/files/best.mp4")!, width: 320, height: 180)])
+        #expect(!model.isAdded(clip))
+        model.add(clip)
+        await waitUntil { model.isAdded(clip) && model.adding.isEmpty }
+        let record = try #require(model.record(for: clip))
+        #expect(record.title == "Calm sea" && record.category == "Pixabay" && record.kind == .video)
+        #expect(record.tags.contains("stock:pixabay-77") && record.tags.contains("pixabay"))
+        #expect(lib.records.count == 1 && model.adding.isEmpty)
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: lib.storage.downloadsDir.path)) ?? []
+        #expect(leftovers.isEmpty, "temporary download left behind: \(leftovers)")
+
+        model.add(clip)                        // already added: no second download
+        await spin(0.3)
+        #expect(server.requestedPaths.filter { $0 == "/files/best.mp4" }.count == 1)
+    }
+
+    @Test func aFailedDownloadIsReportedAndLeavesNothingBehind() async throws {
+        let server = try MiniWebServer()                       // /missing.mp4 is a 404
+        let (model, lib, _) = make(server: server)
+        let clip = StockClip(provider: .pexels, providerID: 5, title: "Gone", author: "x", pageURL: nil, thumbURL: nil, duration: 1,
+                             files: [StockFile(url: URL(string: "http://127.0.0.1:\(server.port)/missing.mp4")!, width: 1920, height: 1080)])
+        model.add(clip)
+        await waitUntil { model.message?.contains("Could not add") == true }
+        #expect(model.message?.contains("Could not add “Gone”") == true && !model.isAdded(clip) && lib.records.isEmpty && model.adding.isEmpty)
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: lib.storage.downloadsDir.path)) ?? []
+        #expect(leftovers.isEmpty)
+    }
+
+    @Test func keysAreSavedTrimmedAndRemovable() throws {
+        let server = try MiniWebServer()
+        let (model, _, defaults) = make(server: server, key: nil)
+        model.setKey("  abc  \n", for: .pexels)
+        #expect(model.key(for: .pexels) == "abc" && defaults.string(forKey: StockProvider.pexels.defaultsKey) == "abc")
+        model.provider = .pexels
+        #expect(model.hasKey)
+        model.setKey("", for: .pexels)
+        #expect(!model.hasKey && defaults.string(forKey: StockProvider.pexels.defaultsKey) == nil)
     }
 }

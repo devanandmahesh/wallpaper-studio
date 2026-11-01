@@ -26,6 +26,7 @@ struct Thumb<Content: View>: View {
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .overlay(content)
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .hoverLift()
     }
 }
 
@@ -45,8 +46,11 @@ struct PageHeader<Trailing: View>: View {
             Spacer()
             trailing
         }
-        .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 8)
+        .padding(.horizontal, 24).padding(.top, Self.topInset).padding(.bottom, 8)
     }
+
+    /// With the macOS 26 window design the toolbar softens about 50 pt of content under it; start the heading below that.
+    private static var topInset: CGFloat { if #available(macOS 26, *) { 14 } else { 20 } }
 }
 
 let gridColumns = [GridItem(.adaptive(minimum: 230), spacing: 18)]
@@ -58,13 +62,16 @@ struct ControlsBar: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            Image(systemName: "play.rectangle.fill").font(.title3).foregroundColor(.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Now playing").font(.caption).foregroundColor(.secondary)
                 Text(nowPlaying).font(.callout).lineLimit(1)
+                    .contentTransition(.opacity)
             }
             Spacer()
             Button { engine.togglePause() } label: {
                 Image(systemName: engine.userPaused ? "play.fill" : "pause.fill")
+                    .contentTransition(.symbolEffect(.replace))
             }
             .help(engine.userPaused ? "Resume" : "Pause").accessibilityLabel(engine.userPaused ? "Resume" : "Pause")
             if engine.playlist.count > 1 {
@@ -72,22 +79,31 @@ struct ControlsBar: View {
             }
             Button { engine.toggleMute() } label: {
                 Image(systemName: engine.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .contentTransition(.symbolEffect(.replace))
             }
             .help(engine.muted ? "Unmute" : "Mute").accessibilityLabel(engine.muted ? "Unmute" : "Mute")
             Slider(value: Binding(get: { Double(engine.volume) }, set: { engine.setVolume(Float($0)) }), in: 0...1)
                 .frame(width: 90)
             Menu {
                 ForEach(AppDelegate.speeds, id: \.self) { s in
-                    Button(s == 1 ? "Normal" : "\(s)x") { engine.setSpeed(s) }
+                    Button(s == 1 ? "Normal" : speedLabel(s)) { engine.setSpeed(s) }
                 }
-            } label: { Text(engine.speed == 1 ? "1x" : "\(engine.speed)x") }
+            } label: { Text(speedLabel(engine.speed)) }
                 .frame(width: 60)
             Toggle("Fill", isOn: Binding(get: { engine.fill }, set: { _ in engine.toggleFill() }))
+                .toggleStyle(.button).controlSize(.small)
                 .help("Fill the screen (crop) instead of fitting the whole video")
         }
-        .padding(.horizontal, 24).padding(.vertical, 12)
-        .background(.bar)
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 20).padding(.vertical, 10)
+        .glassSurface(in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .animation(.fluid, value: nowPlaying)
+        .animation(.snap, value: engine.userPaused)
+        .animation(.snap, value: engine.muted)
     }
+
+    private func speedLabel(_ s: Float) -> String { String(format: "%gx", Double(s)) }
 
     private var nowPlaying: String {
         guard let url = engine.current else { return "Nothing — pick a wallpaper in Discover or My Library" }

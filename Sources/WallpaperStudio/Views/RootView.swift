@@ -24,13 +24,22 @@ struct RootView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+            .toolbar(removing: .sidebarToggle)
         } detail: {
-            VStack(spacing: 0) {
-                page
-                Divider()
-                ControlsBar(engine: engine)
-            }
+            ZStack { page.id(nav.section).transition(.page) }
+                .animation(.fluid, value: nav.section)
+                .navigationTitle((nav.section ?? .discover).title)
+                .toolbar(removing: .sidebarToggle)
+                .clearTopEdge()
+                .softBottomEdge()
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    GlassGroup {
+                        ControlsBar(engine: engine)
+                            .padding(.horizontal, 24).padding(.bottom, 14).padding(.top, 6)
+                    }
+                }
         }
+        .clearWindowToolbar()
         .frame(minWidth: 900, minHeight: 600)
         .onReceive(engine.sectionRequests) { nav.section = $0 }
     }

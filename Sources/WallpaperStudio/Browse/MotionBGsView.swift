@@ -34,20 +34,14 @@ struct MotionBGsView: View {
             }
             .padding(.horizontal, 24).padding(.vertical, 8)
             if let progress = browser.progress { ProgressView(value: progress).padding(.horizontal, 24) }
-            if let status = browser.status {
-                HStack {
-                    Text(status).font(.callout)
-                    Spacer()
-                    Button { browser.status = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("Dismiss")
-                }
-                .padding(8).background(Color.accentColor.opacity(0.15)).cornerRadius(8).padding(.horizontal, 24).padding(.bottom, 4)
-            }
+            if let status = browser.status { StatusBanner(text: status) { browser.status = nil } }
             BrowserWebView(webView: browser.webView)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .padding(.horizontal, 24)
             Text("Wallpapers on motionbgs.com belong to their creators and are offered for personal use. Open a wallpaper page and press HD or 4K Download; the video is added to your library. Other links open in your own browser.")
                 .font(.caption).foregroundColor(.secondary).padding(.horizontal, 24).padding(.vertical, 8)
         }
+        .animation(.fluid, value: browser.status)
         .onAppear { if browser.webView.url == nil { browser.loadStart() } }
         .onDisappear { browser.webView.stopLoading() }
     }

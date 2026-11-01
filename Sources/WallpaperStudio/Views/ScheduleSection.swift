@@ -65,13 +65,13 @@ struct ScheduleSection: View {
                 .frame(maxWidth: 200)
             }
             HStack(spacing: 6) {
-                ForEach(dayNames, id: \.0) { day in
-                    let on = draft.weekdays.contains(day.0)
-                    Button(day.1) { if on { draft.weekdays.remove(day.0) } else { draft.weekdays.insert(day.0) } }
-                        .buttonStyle(.plain).font(.caption)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(on ? Color.accentColor : Color.secondary.opacity(0.2)))
-                        .foregroundColor(on ? .white : .primary)
+                GlassGroup(spacing: 6) {
+                    HStack(spacing: 6) {
+                        ForEach(dayNames, id: \.0) { day in
+                            let on = draft.weekdays.contains(day.0)
+                            GlassChip(title: day.1, selected: on, compact: true) { if on { draft.weekdays.remove(day.0) } else { draft.weekdays.insert(day.0) } }
+                        }
+                    }
                 }
                 Spacer()
                 Button("Add Rule") {

@@ -57,7 +57,7 @@ struct LibraryDetailView: View {
                 .frame(width: 420)
                 HStack {
                     Button("Set as Wallpaper") { Task { await library.play(record) } }
-                        .buttonStyle(.borderedProminent).disabled(record.isTrashed)
+                        .glassButton(prominent: true).disabled(record.isTrashed)
                     Button("Show in Finder") {
                         if let url = library.fileURL(record) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                     }

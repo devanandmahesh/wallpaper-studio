@@ -2,7 +2,17 @@ import SwiftUI
 import StudioCore
 import StudioRender
 
-enum DiscoverSource: String, CaseIterable { case freeClips = "Free clips & generated", motionBGs = "MotionBGs (browse the web)" }
+enum DiscoverSource: String, CaseIterable { case freeClips = "Free clips & generated", stock = "Pexels & Pixabay", motionBGs = "MotionBGs (web)" }
+
+extension DiscoverSource {
+    var subtitle: String {
+        switch self {
+        case .freeClips: return "Free wallpapers — download once, play offline"
+        case .stock: return "Search free stock videos from Pexels and Pixabay"
+        case .motionBGs: return "Browse motionbgs.com; downloads land in your library"
+        }
+    }
+}
 
 final class DiscoverState: ObservableObject {
     @Published var category = "All"
@@ -17,33 +27,26 @@ struct DiscoverView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader("Discover", state.source == .freeClips ? "Free wallpapers — download once, play offline" : "Browse motionbgs.com; downloads land in your library") {
+            PageHeader("Discover", state.source.subtitle) {
                 Picker("", selection: $state.source) {
                     ForEach(DiscoverSource.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 360)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 460)
             }
-            if state.source == .motionBGs {
-                MotionBGsView(library: library)
-            } else {
-                freeClips
+            ZStack {
+                switch state.source {
+                case .motionBGs: MotionBGsView(library: library).transition(.page)
+                case .stock: StockView(library: library).transition(.page)
+                case .freeClips: VStack(spacing: 0) { freeClips }.transition(.page)
+                }
             }
+            .animation(.fluid, value: state.source)
         }
     }
 
     @ViewBuilder private var freeClips: some View {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack {
-                    ForEach(Catalog.categories, id: \.self) { name in
-                        Button(name) { state.category = name }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(Capsule().fill(state.category == name ? Color.accentColor : Color.secondary.opacity(0.18)))
-                            .foregroundColor(state.category == name ? .white : .primary)
-                    }
-                }
+            ChipRow(items: Catalog.categories, selected: { state.category == $0 }, title: { $0 }) { state.category = $0 }
                 .padding(.horizontal, 24).padding(.vertical, 8)
-            }
             ScrollView {
                 if state.category == "All" || state.category == "Generated" {
                     VStack(alignment: .leading, spacing: 6) {
@@ -81,8 +84,8 @@ private struct DiscoverCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Thumb {
-                AsyncImage(url: item.thumbURL) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
+                AsyncImage(url: item.thumbURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
+                    if let image = phase.image { image.resizable().scaledToFill().transition(.opacity) }
                     else if phase.error != nil { Image(systemName: "photo").foregroundColor(.secondary) }
                     else { ProgressView() }
                 }
@@ -102,11 +105,11 @@ private struct DiscoverCard: View {
             }
         } else if let record, !record.isTrashed {
             Button("Set as Wallpaper") { Task { await library.play(record) } }
-                .buttonStyle(.borderedProminent)
+                .glassButton(prominent: true)
         } else if let record {
-            Button("Restore from Trash") { Task { await library.restore(record.id) } }
+            Button("Restore from Trash") { Task { await library.restore(record.id) } }.glassButton()
         } else {
-            Button(downloads.failed.contains(item.id) ? "Retry Download" : "Download") { downloads.download(item) }
+            Button(downloads.failed.contains(item.id) ? "Retry Download" : "Download") { downloads.download(item) }.glassButton()
         }
     }
 }
@@ -132,14 +135,15 @@ private struct BuiltInCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Thumb {
-                if let image = loader.image { Image(nsImage: image).resizable().scaledToFill() } else { ProgressView() }
+                if let image = loader.image { Image(nsImage: image).resizable().scaledToFill().transition(.opacity) } else { ProgressView() }
             }
+            .animation(.easeOut(duration: 0.3), value: loader.image != nil)
             Text(scene.name).font(.headline)
             Text(scene.reactsToAudio ? "Generated · GPU · reacts to audio" : scene.reactsToPointer ? "Generated · GPU · reacts to the mouse" : "Generated · GPU · live").font(.caption).foregroundColor(.secondary)
             Button("Set as Wallpaper") {
                 Task { if let record = await library.installBuiltIn(scene) { await library.play(record) } }
             }
-            .buttonStyle(.borderedProminent)
+            .glassButton(prominent: true)
         }
         .onAppear { loader.load(scene) }
     }

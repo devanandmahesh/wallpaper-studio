@@ -92,7 +92,7 @@ struct EditorWorkspace: View {
             Spacer()
             Button("Export Package…") { exportPackage() }
             Button("Add to Library") { Task { await addToLibrary(play: false) } }
-            Button("Set as Wallpaper") { Task { await addToLibrary(play: true) } }.buttonStyle(.borderedProminent)
+            Button("Set as Wallpaper") { Task { await addToLibrary(play: true) } }.glassButton(prominent: true)
         }
         .padding(8)
     }

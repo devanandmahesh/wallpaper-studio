@@ -42,20 +42,13 @@ struct LibraryView: View {
                 }
             }
             controls
-            if let status = library.status {
-                HStack {
-                    Text(status).font(.callout)
-                    Spacer()
-                    Button { library.status = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
-                }
-                .padding(10).background(Color.accentColor.opacity(0.15)).cornerRadius(8)
-                .padding(.horizontal, 24).padding(.bottom, 6)
-            }
+            if let status = library.status { StatusBanner(text: status) { library.status = nil } }
             if let error = library.loadError {
                 Text("The library could not be opened: \(error)").foregroundColor(.red).padding()
             }
             content(items)
         }
+        .animation(.fluid, value: library.status)
         .overlay(dropOverlay)
         .onDrop(of: [.fileURL], isTargeted: Binding(get: { ui.dropTargeted }, set: { ui.dropTargeted = $0 })) { providers in
             loadURLs(from: providers)
@@ -99,17 +92,9 @@ struct LibraryView: View {
             }
             let tags = library.tagCounts.prefix(14)
             if !tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(Array(tags), id: \.tag) { entry in
-                            let on = library.query.tag == entry.tag
-                            Button("#\(entry.tag) \(entry.count)") { library.query.tag = on ? nil : entry.tag }
-                                .buttonStyle(.plain).font(.caption)
-                                .padding(.horizontal, 10).padding(.vertical, 4)
-                                .background(Capsule().fill(on ? Color.accentColor : Color.secondary.opacity(0.18)))
-                                .foregroundColor(on ? .white : .primary)
-                        }
-                    }
+                ChipRow(items: Array(tags).map(\.tag), selected: { library.query.tag == $0 }, compact: true,
+                        title: { tag in "#\(tag) \(tags.first(where: { $0.tag == tag })?.count ?? 0)" }) { tag in
+                    library.query.tag = library.query.tag == tag ? nil : tag
                 }
             }
         }
@@ -323,7 +308,7 @@ private struct LibraryCard: View {
         } else {
             HStack {
                 Button(active ? "Playing" : "Set as Wallpaper") { Task { await library.play(record) } }
-                    .buttonStyle(.borderedProminent).disabled(active)
+                    .glassButton(prominent: true).disabled(active)
                 Spacer()
                 Button { library.selectedID = record.id } label: { Image(systemName: "info.circle") }.buttonStyle(.plain).help("Details").accessibilityLabel("Details")
             }

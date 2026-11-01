@@ -130,6 +130,11 @@ struct SettingsView: View {
                 Section("Lock screen") {
                     LockScreenRow(sync: engine.lockSync)
                 }
+                Section("Stock video keys") {
+                    ForEach(StockProvider.allCases) { StockKeyField(provider: $0) }
+                    Text("Free API keys for Discover → Pexels & Pixabay. They are stored on this Mac only and sent only to the site they belong to.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
                 Section("Storage") {
                     Text(library.storage.root.path).font(.caption).foregroundColor(.secondary).textSelection(.enabled)
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.storage.root]) }
@@ -186,6 +191,37 @@ private struct LockScreenRow: View {
                 if let when = sync.lastSync { Text("Last updated \(when.formatted(date: .omitted, time: .standard))").font(.caption).foregroundColor(.secondary) }
             }
             if let error = sync.lastError { Text(error).font(.caption).foregroundColor(.orange) }
+        }
+    }
+}
+
+private final class StockKeyDraft: ObservableObject {
+    @Published var text: String
+    @Published var saved: Bool
+    let provider: StockProvider
+    init(_ provider: StockProvider) {
+        self.provider = provider
+        let key = UserDefaults.standard.string(forKey: provider.defaultsKey) ?? ""
+        text = key; saved = !key.isEmpty
+    }
+    func save() {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { UserDefaults.standard.removeObject(forKey: provider.defaultsKey) }
+        else { UserDefaults.standard.set(clean, forKey: provider.defaultsKey) }
+        text = clean; saved = !clean.isEmpty
+    }
+    func remove() { text = ""; save() }
+}
+
+private struct StockKeyField: View {
+    @StateObject private var draft: StockKeyDraft
+    init(provider: StockProvider) { _draft = StateObject(wrappedValue: StockKeyDraft(provider)) }
+    var body: some View {
+        HStack {
+            SecureField("\(draft.provider.name) API key", text: $draft.text).onSubmit { draft.save() }
+            Button("Save") { draft.save() }
+            if draft.saved { Button("Remove") { draft.remove() } }
+            Link("Get key", destination: draft.provider.keyHelpURL)
         }
     }
 }

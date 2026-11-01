@@ -268,3 +268,27 @@ Not verified: the lock screen on a real lock (needs the screen to be locked by h
 `ProcessRunner` drained stderr on a Dispatch global queue and then waited for it. Dispatch's workers are shared with Swift concurrency, so
 when every caller was parked in that wait the queued reader never got a thread and the whole suite stalled. The reader is now a dedicated
 `Thread`. Full suite: 392 tests (162 + 53 + 177), all passing.
+
+### Pexels & Pixabay grid
+Discover has a third source, **Pexels & Pixabay**: a native grid (search, one-tap topics, load more, Add to Library / Set as Wallpaper)
+backed by the two sites' official video APIs. It needs a free API key per site, entered on first use or in Settings → Stock video keys;
+keys are kept in this Mac's preferences and sent only to their own site (Pexels in a header, Pixabay as its API requires, in the query).
+Parsing and request building are pure and live in `StudioCore/Stock`; the model is `Browse/StockModel.swift`, the view `Browse/StockView.swift`.
+Tests: 6 parser/request tests and 9 model tests against a local fake API. Full suite: 407 tests. Not exercised against the live APIs
+(no key available here), so the first real search is the final check.
+
+### Liquid Glass redesign
+The navigation layer uses Liquid Glass on macOS 26+ and falls back to plain materials / system styles on macOS 14–15 (everything is behind
+`#available(macOS 26, *)`, in `Views/Glass.swift`). Glass is used only for controls: the floating now-playing bar (a glass capsule over the
+page, replacing the full-width bar), category / tag / weekday pills (`GlassChip`, `ChipRow`), status banners, and the glass button styles for
+actions. Content (thumbnails, lists, forms) is never glass. Neighbouring glass shapes share a `GlassEffectContainer` (`GlassGroup`).
+The system sidebar and window controls pick up the new look only if the binary is stamped as built against SDK 26+; SwiftPM stamps the
+minimum (14.0), so `build.sh` re-stamps it with `vtool` (minimum OS stays 14.0) before signing. Also fixed: the speed menu showed "1.500000x".
+
+### Window top and motion polish
+- Top of the window: the page name now lives in the title bar (`navigationTitle`), the redundant sidebar-toggle button is gone, and the empty
+  smeared band under the title bar is gone, so each page starts right under the title bar with a crisp heading.
+- Motion (`Animation.fluid` / `.snap` / `AnyTransition.page` in `Views/Glass.swift`): pages leave quickly and arrive just after (no double
+  exposure), Discover sources cross-fade, chips and buttons animate their state, cards lift on hover, thumbnails fade in, new search results
+  ease in, banners slide in and out, and the now-playing bar's icons morph. Everything collapses to a near-instant change when Reduce Motion
+  is on in System Settings.
